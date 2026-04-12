@@ -2,10 +2,12 @@ import os
 import pickle
 import time
 from dataclasses import dataclass
+from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 
 from dotenv import load_dotenv
 from selenium import webdriver
+from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from url_normalize import url_normalize
@@ -20,6 +22,13 @@ class Config:
 
 
 class PortalClient:
+    MEMO_FILTERS = {
+        "all": "all",
+        "unread": "unread",
+        "read": "read",
+        "star": "star",
+    }
+
     def __init__(self, config: Config) -> None:
         self.config = config
         self.driver: webdriver.Chrome | None = None
@@ -53,9 +62,28 @@ class PortalClient:
     def login_url(self) -> str:
         return f"{self.config.portal_url}/portal"
 
+    @property
+    def officememo_url(self) -> str:
+        return f"{self.config.portal_url}/portal/OfficeMemo/ViewReceivedTitles"
+
+    def build_officememo_url(
+        self,
+        filter_type: Literal["all", "unread", "read", "star"] = "all",
+        current_page: int = 1,
+    ) -> str:
+        if filter_type not in self.MEMO_FILTERS:
+            raise ValueError("filter_type must be one of: all, unread, read, star")
+        if current_page < 1:
+            raise ValueError("current_page must be >= 1")
+
+        return (
+            f"{self.officememo_url}?currentPage={current_page}"
+            f"&filter={self.MEMO_FILTERS[filter_type]}"
+        )
+
     @staticmethod
     def _normalize_url(url: str) -> str:
-        return url_normalize(url)
+        return url_normalize(url) or ""
 
     def _normalize_url_for_check(self, url: str) -> str:
         normalized_url = self._normalize_url(url)
@@ -146,6 +174,140 @@ class PortalClient:
         print("判定結果: 予期しないページに遷移しました")
         return False
 
+    def get_notification_counts(self):
+        if self.driver is None:
+            raise RuntimeError("Driver is not started")
+
+        self.driver.get(self.target_url)
+        counts = {
+            "memo": 0,  # 連絡（未読）
+            "schedule": 0,  # 予定（未承諾）
+            "questionnaire": 0,  # アンケート（未回答）
+        }
+
+        try:
+            # 1. 連絡（未読件数）の取得
+            # href属性に 'OfficeMemo' を含む <a> タグの中の <span class="fs-5"> を探す
+            memo_element = self.driver.find_element(
+                By.CSS_SELECTOR, "a[href*='OfficeMemo'] span.fs-5"
+            )
+            counts["memo"] = int(memo_element.text)
+
+            # 2. 予定（未承諾件数）の取得
+            # href属性に 'Schedule' を含む
+            schedule_element = self.driver.find_element(
+                By.CSS_SELECTOR, "a[href*='Schedule'] span.fs-5"
+            )
+            counts["schedule"] = int(schedule_element.text)
+
+            # 3. アンケート（未回答件数）の取得
+            # href属性に 'Questionnaire' を含む
+            questionnaire_element = self.driver.find_element(
+                By.CSS_SELECTOR, "a[href*='Questionnaire'] span.fs-5"
+            )
+            counts["questionnaire"] = int(questionnaire_element.text)
+
+        except NoSuchElementException as e:
+            print(f"要素が見つかりませんでした: {e}")
+        except ValueError:
+            print("件数のテキストを数値に変換できませんでした")
+
+        return counts
+
+    def get_messages(
+        self,
+        filter_type: Literal["all", "unread", "read", "star"] = "all",
+        current_page: int = 1,
+    ) -> list[dict]:
+        if self.driver is None:
+            raise RuntimeError("Driver is not started")
+
+        target_url = self.build_officememo_url(
+            filter_type=filter_type,
+            current_page=current_page,
+        )
+        self.driver.get(target_url)
+        messages = []
+
+        # メッセージのカード要素をすべて取得
+        cards = self.driver.find_elements(By.CSS_SELECTOR, "#commonViewReceivedTitles .card.flex-row")
+
+        for card in cards:
+            try:
+                # 1. タイトルとリンクURL
+                title_element = card.find_element(By.CSS_SELECTOR, "a.no-underline")
+                title = title_element.text.strip()
+                link_url = title_element.get_attribute("href")
+
+                # 2. メッセージID（チェックボックスのID属性から取得）
+                checkbox = card.find_element(By.CSS_SELECTOR, "input.bulk_operations")
+                message_id = checkbox.get_attribute("id")
+
+                # 3. 未読ステータス（要素が存在すれば未読）
+                # find_elements（複数形）を使うことで、要素がない場合でもエラーにならず空リストが返る
+                is_unread = (
+                    len(
+                        card.find_elements(
+                            By.XPATH, ".//span[contains(text(), '未読')]"
+                        )
+                    )
+                    > 0
+                )
+
+                # 4. 重要フラグ（要素が存在すれば重要）
+                is_important = (
+                    len(
+                        card.find_elements(
+                            By.XPATH, ".//span[contains(text(), '重要')]"
+                        )
+                    )
+                    > 0
+                )
+
+                # 5. 更新ありフラグ
+                is_updated = (
+                    len(
+                        card.find_elements(
+                            By.XPATH, ".//span[contains(text(), '更新あり')]"
+                        )
+                    )
+                    > 0
+                )
+
+                # 6. カテゴリ（タグアイコンの隣にあるspanテキスト）
+                try:
+                    category = card.find_element(
+                        By.XPATH,
+                        ".//i[contains(@class, 'bi-tag')]/following-sibling::span",
+                    ).text
+                except:
+                    category = "なし"
+
+                # 7. 日付（一番右下に配置されているテキスト）
+                date_text = card.find_element(By.CSS_SELECTOR, "span.ms-auto").text
+
+                # 抽出したデータを辞書としてリストに追加
+                messages.append(
+                    {
+                        "id": message_id,
+                        "title": title,
+                        "url": link_url,
+                        "category": category,
+                        "date": date_text,
+                        "is_unread": is_unread,
+                        "is_important": is_important,
+                        "is_updated": is_updated,
+                    }
+                )
+
+            except Exception as e:
+                print(
+                    f"メッセージの抽出中にエラーが発生しました (ID: {message_id if 'message_id' in locals() else '不明'}): {e}"
+                )
+                continue
+
+        return messages
+
     def close(self) -> None:
         if self.driver is None:
             return
@@ -165,7 +327,17 @@ class PortalClient:
                 print("ログインに失敗しました")
                 raise Exception("ログインに失敗しました")
 
-            time.sleep(10)
+            counts = self.get_notification_counts()
+            print(
+                f"連絡: {counts['memo']}件, 予定: {counts['schedule']}件, アンケート: {counts['questionnaire']}件"
+            )
+
+            messages = self.get_messages(filter_type="all")
+            for msg in messages:
+                print(
+                    f"タイトル: {msg['title']}, 未読: {msg['is_unread']}, 重要: {msg['is_important']}"
+                )
+
         finally:
             self.close()
 
