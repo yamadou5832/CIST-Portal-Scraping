@@ -4,7 +4,10 @@ import { Browser, chromium, type BrowserContext, type Page } from "playwright";
 
 import type { AppConfig } from "./config.js";
 import type {
+  FetchReceivedOfficeMemosOptions,
   MyPageData,
+  OfficeMemoFilter,
+  ReceivedOfficeMemo,
   ReflectionReply,
   TimetableEntry,
   UnsubmittedReport,
@@ -33,6 +36,23 @@ interface RawTimetableEntry {
   classroom: string;
   course_name: string;
   courseId: string;
+}
+
+interface RawReceivedOfficeMemo {
+  title: string;
+  officeMemoId: string;
+  category: string;
+  date: string;
+  isBookmarked: boolean;
+  isReviewNeeded: boolean;
+  isUnread: boolean;
+  isUpdated: boolean;
+  isImportant: boolean;
+}
+
+interface RawReceivedOfficeMemosPage {
+  items: RawReceivedOfficeMemo[];
+  isLastPage: boolean;
 }
 
 function pad2(value: number): string {
@@ -80,6 +100,51 @@ function parsePortalDateTime(text: string, fallbackYear?: number): Date {
   }
 
   throw new Error(`Failed to parse portal datetime: ${text}`);
+}
+
+function parsePortalMonthDay(text: string, referenceDate: Date): Date {
+  const cleaned = text.replace(/\s+/g, "").trim();
+
+  const fullMatch = /^(\d{4})\/(\d{2})\/(\d{2})$/.exec(cleaned);
+  if (fullMatch) {
+    const [, year, month, day] = fullMatch;
+    return new Date(
+      Number.parseInt(year, 10),
+      Number.parseInt(month, 10) - 1,
+      Number.parseInt(day, 10),
+      0,
+      0,
+      0,
+      0,
+    );
+  }
+
+  const shortMatch = /^(\d{2})\/(\d{2})$/.exec(cleaned);
+  if (shortMatch) {
+    const [, month, day] = shortMatch;
+    const currentYear = referenceDate.getFullYear();
+    const candidate = new Date(currentYear, Number.parseInt(month, 10) - 1, Number.parseInt(day, 10), 0, 0, 0, 0);
+
+    const referenceMidnight = new Date(
+      referenceDate.getFullYear(),
+      referenceDate.getMonth(),
+      referenceDate.getDate(),
+      0,
+      0,
+      0,
+      0,
+    );
+    const diffMs = candidate.getTime() - referenceMidnight.getTime();
+    const diffDays = diffMs / (1000 * 60 * 60 * 24);
+
+    if (diffDays > 31) {
+      candidate.setFullYear(candidate.getFullYear() - 1);
+    }
+
+    return candidate;
+  }
+
+  throw new Error(`Failed to parse portal month/day: ${text}`);
 }
 
 function normalizeUrl(input: string): string {
@@ -131,6 +196,74 @@ export class PortalScraperService {
 
   async fetchTimetable(): Promise<TimetableEntry[]> {
     return this.withAuthenticatedPage((page) => this.extractTimetable(page));
+  }
+
+  async fetchReceivedOfficeMemos(options: FetchReceivedOfficeMemosOptions = {}): Promise<ReceivedOfficeMemo[]> {
+    const filter = options.filter ?? "all";
+    const searchKeyword = options.searchKeyword ?? "";
+    const categoryFilter = options.categoryFilter ?? "c_all";
+
+    return this.withAuthenticatedPage(async (page) => {
+      const referenceDate = await this.getCurrentPortalDate(page);
+      const items: ReceivedOfficeMemo[] = [];
+      const seenIds = new Set<string>();
+      let currentPage = 1;
+
+      while (true) {
+        const receivedTitlesUrl = this.buildReceivedOfficeMemosUrl(currentPage, filter, searchKeyword, categoryFilter);
+        await page.goto(receivedTitlesUrl, { waitUntil: "domcontentloaded" });
+
+        const { items: rawItems, isLastPage } = await this.extractReceivedOfficeMemosPage(page);
+
+        for (const rawItem of rawItems) {
+          if (seenIds.has(rawItem.officeMemoId)) {
+            continue;
+          }
+
+          let date: Date;
+          try {
+            date = parsePortalMonthDay(rawItem.date, referenceDate);
+          } catch {
+            continue;
+          }
+
+          seenIds.add(rawItem.officeMemoId);
+          items.push({
+            title: rawItem.title,
+            officeMemoId: rawItem.officeMemoId,
+            category: rawItem.category,
+            date,
+            isBookmarked: rawItem.isBookmarked,
+            isReviewNeeded: rawItem.isReviewNeeded,
+            isUnread: rawItem.isUnread,
+            isUpdated: rawItem.isUpdated,
+            isImportant: rawItem.isImportant,
+          });
+        }
+
+        if (isLastPage) {
+          break;
+        }
+
+        currentPage += 1;
+      }
+
+      return items;
+    });
+  }
+
+  private buildReceivedOfficeMemosUrl(
+    currentPage: number,
+    filter: OfficeMemoFilter,
+    searchKeyword: string,
+    categoryFilter: string,
+  ): string {
+    const url = new URL(`${this.config.portalUrl}/portal/OfficeMemo/ViewReceivedTitles`);
+    url.searchParams.set("currentPage", String(Math.max(1, currentPage)));
+    url.searchParams.set("filter", filter);
+    url.searchParams.set("searchKeyword", searchKeyword);
+    url.searchParams.set("c_filter", categoryFilter);
+    return url.toString();
   }
 
   private async withAuthenticatedPage<T>(handler: (page: Page) => Promise<T>): Promise<T> {
@@ -205,6 +338,75 @@ export class PortalScraperService {
   private async persistStorageState(context: BrowserContext): Promise<void> {
     await fs.mkdir(path.dirname(this.config.storageStatePath), { recursive: true });
     await context.storageState({ path: this.config.storageStatePath });
+  }
+
+  private async extractReceivedOfficeMemosPage(page: Page): Promise<RawReceivedOfficeMemosPage> {
+    return page.evaluate<RawReceivedOfficeMemosPage>(() => {
+      const cards = [...document.querySelectorAll("#commonViewReceivedTitles > div.card.mb-3.flex-row")];
+      const items: RawReceivedOfficeMemo[] = [];
+
+      for (const card of cards) {
+        const titleLink = card.querySelector<HTMLAnchorElement>("h5.card-title a.no-underline");
+        const title = titleLink?.textContent?.trim() ?? "";
+        const href = titleLink?.getAttribute("href") ?? "";
+
+        let officeMemoId = "";
+        if (href) {
+          try {
+            officeMemoId = new URL(href, window.location.href).searchParams.get("officememoid") ?? "";
+          } catch {
+            officeMemoId = "";
+          }
+        }
+
+        if (!officeMemoId) {
+          officeMemoId = card.querySelector<HTMLInputElement>("input.bulk_operations")?.id?.trim() ?? "";
+        }
+
+        const date = card.querySelector<HTMLElement>("p.card-text span.ms-auto")?.textContent?.trim() ?? "";
+
+        const categoryElement = card.querySelector<HTMLElement>("p.card-text .bi-tag")?.parentElement;
+        const category = categoryElement?.querySelector<HTMLElement>("span")?.textContent?.trim() ?? "---";
+
+        const badgeTexts = [...card.querySelectorAll<HTMLElement>(".position-absolute span.badge")]
+          .map((element) => (element.textContent ?? "").replace(/\s+/g, ""))
+          .filter((text) => text.length > 0);
+
+        const isBookmarked = Boolean(card.querySelector("i.bi-star-fill"));
+        const isReviewNeeded = badgeTexts.some((text) => text.includes("要確認"));
+        const isUnread = badgeTexts.some((text) => text.includes("未読"));
+        const isUpdated = badgeTexts.some((text) => text.includes("更新あり"));
+        const isImportant = [...card.querySelectorAll("p.card-text span")].some((element) =>
+          (element.textContent ?? "").replace(/\s+/g, "").includes("重要"),
+        );
+
+        if (!title || !officeMemoId || !date) {
+          continue;
+        }
+
+        items.push({
+          title,
+          officeMemoId,
+          category,
+          date,
+          isBookmarked,
+          isReviewNeeded,
+          isUnread,
+          isUpdated,
+          isImportant,
+        });
+      }
+
+      const lastPageControl =
+        document.querySelector<HTMLElement>("ul.pagination li:last-child .page-link") ??
+        document.querySelector<HTMLElement>(".pagination .bi-chevron-double-right")?.closest(".page-link");
+      const isLastPage = !lastPageControl || lastPageControl.classList.contains("disabled");
+
+      return {
+        items,
+        isLastPage,
+      };
+    });
   }
 
   private async extractUnsubmittedReports(page: Page): Promise<UnsubmittedReport[]> {

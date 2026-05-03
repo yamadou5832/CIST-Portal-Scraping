@@ -2,12 +2,32 @@ import express from "express";
 
 import { loadConfig } from "./config.js";
 import { PortalScraperService } from "./scraper.js";
+import type { OfficeMemoFilter } from "./types.js";
 
 const config = loadConfig();
 const scraper = new PortalScraperService(config);
 
 const app = express();
 app.use(express.json());
+
+function getQueryString(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    const first = value[0];
+    return typeof first === "string" ? first : undefined;
+  }
+  return undefined;
+}
+
+function parseOfficeMemoFilter(value: unknown): OfficeMemoFilter | null {
+  const filter = getQueryString(value) ?? "all";
+  if (filter === "all" || filter === "unread" || filter === "read" || filter === "star") {
+    return filter;
+  }
+  return null;
+}
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
@@ -43,6 +63,28 @@ app.get("/api/reflection-replies", async (_req, res, next) => {
 app.get("/api/timetable", async (_req, res, next) => {
   try {
     const data = await scraper.fetchTimetable();
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/received-office-memos", async (req, res, next) => {
+  try {
+    const filter = parseOfficeMemoFilter(req.query.filter);
+    if (!filter) {
+      res.status(400).json({ error: "Invalid filter. Expected one of: all, unread, read, star" });
+      return;
+    }
+
+    const searchKeyword = getQueryString(req.query.searchKeyword) ?? "";
+    const categoryFilter = getQueryString(req.query.c_filter) ?? "c_all";
+
+    const data = await scraper.fetchReceivedOfficeMemos({
+      filter,
+      searchKeyword,
+      categoryFilter,
+    });
     res.json(data);
   } catch (error) {
     next(error);
