@@ -1,0 +1,19 @@
+{
+  "name": "cist-portal-scraping-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "kv_namespaces": [
+    {
+      "binding": "CIST_AUTH_KV",
+      "id": "2b2a5d8a1053474a82617fcdadeda7d9",
+      "remote": true,
+    },
+  ],
+  "browser": {
+    "binding": "BROWSER",
+  },
+  "vars": {
+    "CIST_PORTAL_URL": "https://portal.mc.chitose.ac.jp",
+  },
+}

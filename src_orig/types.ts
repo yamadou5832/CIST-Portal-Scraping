@@ -25,6 +25,9 @@ export interface TimetableEntry {
 
 export type OfficeMemoFilter = "all" | "unread" | "read" | "star";
 
+export const OFFICE_MEMO_DEFAULT_LIMIT = 10;
+export const OFFICE_MEMO_PORTAL_PAGE_SIZE = 10;
+
 export interface ReceivedOfficeMemo {
   title: string;
   officeMemoId: string;
@@ -38,21 +41,27 @@ export interface ReceivedOfficeMemo {
 }
 
 export interface FetchReceivedOfficeMemosOptions {
+  page?: number;
+  limit?: number;
   filter?: OfficeMemoFilter;
   searchKeyword?: string;
   categoryFilter?: string;
+}
+
+export interface PaginationInfo {
+  page: number;
+  limit: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+}
+
+export interface PaginatedReceivedOfficeMemos {
+  items: ReceivedOfficeMemo[];
+  pagination: PaginationInfo;
 }
 
 export interface MyPageData {
   unsubmitted_reports: UnsubmittedReport[];
   new_reflection_replies: ReflectionReply[];
   timetable: TimetableEntry[];
-}
-
-export interface AppEnv {
-  BROWSER: Fetcher;
-  CIST_AUTH_KV: KVNamespace;
-  CIST_USERNAME: string;
-  CIST_PASSWORD: string;
-  CIST_PORTAL_URL?: string;
 }
