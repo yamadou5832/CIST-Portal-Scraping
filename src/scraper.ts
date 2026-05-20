@@ -3,27 +3,29 @@ import path from "node:path";
 import { Browser, chromium, type BrowserContext, type Page } from "playwright";
 
 import type { AppConfig } from "./config.js";
-import type {
-  CourseLectureDetail,
-  CourseSummary,
-  DistributionPdfGroup,
-  DistributionPdfItem,
-  FetchReceivedOfficeMemosOptions,
-  LectureSessionDetail,
-  MyPageData,
-  MyPageNewInformationSummary,
-  MonthlySchedule,
-  MonthlyScheduleEvent,
-  OfficeMemoAttachment,
-  OfficeMemoFilter,
-  PendingAppointmentSummary,
-  ReceivedOfficeMemoDetail,
-  ReceivedOfficeMemo,
-  ReflectionReply,
-  TimetableEntry,
-  UndoneQuestionnaire,
-  UnsubmittedReport,
-  UnsubmittedReportSummary,
+import {
+  type CourseLectureDetail,
+  type CourseSummary,
+  type DistributionPdfGroup,
+  type DistributionPdfItem,
+  type FetchReceivedOfficeMemosOptions,
+  type LectureSessionDetail,
+  type MyPageData,
+  type MyPageNewInformationSummary,
+  type MonthlySchedule,
+  type MonthlyScheduleEvent,
+  type OfficeMemoAttachment,
+  type OfficeMemoFilter,
+  type PendingAppointmentSummary,
+  type ReceivedOfficeMemoDetail,
+  type ReceivedOfficeMemo,
+  type ReflectionReply,
+  type TimetableEntry,
+  type UndoneQuestionnaire,
+  type UnsubmittedReport,
+  type UnsubmittedReportSummary,
+  type PaginatedReceivedOfficeMemos,
+  OFFICE_MEMO_PORTAL_PAGE_SIZE,
 } from "./types.js";
 
 interface RawUnsubmittedReport {
@@ -157,6 +159,19 @@ function parsePortalMonthDay(text: string, referenceDate: Date): Date {
     return candidate;
   }
 
+  const timeMatch = /^(\d{2}):(\d{2})$/.exec(cleaned);
+  if (timeMatch) {
+    return new Date(
+      referenceDate.getFullYear(),
+      referenceDate.getMonth(),
+      referenceDate.getDate(),
+      0,
+      0,
+      0,
+      0,
+    );
+  }
+
   throw new Error(`Failed to parse portal month/day: ${text}`);
 }
 
@@ -237,18 +252,19 @@ export class PortalScraperService {
     return this.withAuthenticatedPage((page) => this.extractTimetable(page));
   }
 
-  async fetchReceivedOfficeMemos(options: FetchReceivedOfficeMemosOptions = {}): Promise<ReceivedOfficeMemo[]> {
+  async fetchReceivedOfficeMemos(options: FetchReceivedOfficeMemosOptions = {}): Promise<PaginatedReceivedOfficeMemos> {
     const filter = options.filter ?? "all";
     const searchKeyword = options.searchKeyword ?? "";
     const categoryFilter = options.categoryFilter ?? "c_all";
+    const pageOption = options.page;
 
     return this.withAuthenticatedPage(async (page) => {
       const referenceDate = await this.getCurrentPortalDate(page);
       const items: ReceivedOfficeMemo[] = [];
       const seenIds = new Set<string>();
-      let currentPage = 1;
 
-      while (true) {
+      if (pageOption !== undefined) {
+        const currentPage = Math.max(1, pageOption);
         const receivedTitlesUrl = this.buildReceivedOfficeMemosUrl(currentPage, filter, searchKeyword, categoryFilter);
         await page.goto(receivedTitlesUrl, { waitUntil: "domcontentloaded" });
 
@@ -280,19 +296,72 @@ export class PortalScraperService {
           });
         }
 
-        if (isLastPage) {
-          break;
+        return {
+          items,
+          pagination: {
+            page: currentPage,
+            limit: OFFICE_MEMO_PORTAL_PAGE_SIZE,
+            hasNextPage: !isLastPage,
+            hasPreviousPage: currentPage > 1,
+          },
+        };
+      } else {
+        let currentPage = 1;
+
+        while (true) {
+          const receivedTitlesUrl = this.buildReceivedOfficeMemosUrl(currentPage, filter, searchKeyword, categoryFilter);
+          await page.goto(receivedTitlesUrl, { waitUntil: "domcontentloaded" });
+
+          const { items: rawItems, isLastPage } = await this.extractReceivedOfficeMemosPage(page);
+
+          for (const rawItem of rawItems) {
+            if (seenIds.has(rawItem.officeMemoId)) {
+              continue;
+            }
+
+            let date: Date;
+            try {
+              date = parsePortalMonthDay(rawItem.date, referenceDate);
+            } catch {
+              continue;
+            }
+
+            seenIds.add(rawItem.officeMemoId);
+            items.push({
+              title: rawItem.title,
+              officeMemoId: rawItem.officeMemoId,
+              category: rawItem.category,
+              date,
+              isBookmarked: rawItem.isBookmarked,
+              isReviewNeeded: rawItem.isReviewNeeded,
+              isUnread: rawItem.isUnread,
+              isUpdated: rawItem.isUpdated,
+              isImportant: rawItem.isImportant,
+            });
+          }
+
+          if (isLastPage) {
+            break;
+          }
+
+          currentPage += 1;
         }
 
-        currentPage += 1;
+        return {
+          items,
+          pagination: {
+            page: 1,
+            limit: items.length,
+            hasNextPage: false,
+            hasPreviousPage: false,
+          },
+        };
       }
-
-      return items;
     });
   }
 
   async fetchReceivedOfficeMemoDetails(options: FetchReceivedOfficeMemosOptions = {}): Promise<ReceivedOfficeMemoDetail[]> {
-    const items = await this.fetchReceivedOfficeMemos(options);
+    const { items } = await this.fetchReceivedOfficeMemos(options);
     return this.withAuthenticatedPage(async (page) => {
       const details: ReceivedOfficeMemoDetail[] = [];
       for (const item of items) {
@@ -395,7 +464,7 @@ export class PortalScraperService {
   }
 
   async fetchReceivedOfficeMemoDetail(officeMemoId: string): Promise<ReceivedOfficeMemoDetail> {
-    const items = await this.fetchReceivedOfficeMemos({ filter: "all" });
+    const { items } = await this.fetchReceivedOfficeMemos({ filter: "all" });
     const target = items.find((item) => item.officeMemoId === officeMemoId);
     if (!target) {
       throw new Error(`officeMemoId not found: ${officeMemoId}`);

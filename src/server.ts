@@ -107,10 +107,23 @@ app.get("/api/received-office-memos", async (req, res, next) => {
     const searchKeyword = getQueryString(req.query.searchKeyword) ?? "";
     const categoryFilter = getQueryString(req.query.c_filter) ?? "c_all";
 
+    const pageRaw = getQueryString(req.query.page);
+    let page: number | undefined = undefined;
+    if (pageRaw !== undefined) {
+      page = Number.parseInt(pageRaw, 10);
+      if (!Number.isInteger(page) || page < 1) {
+        res.status(400).json({ error: "page must be a positive integer" });
+        return;
+      }
+    } else {
+      page = 1;
+    }
+
     const data = await scraper.fetchReceivedOfficeMemos({
       filter,
       searchKeyword,
       categoryFilter,
+      page,
     });
     res.json(data);
   } catch (error) {
