@@ -42,6 +42,33 @@ app.get("/api/mypage", async (_req, res, next) => {
   }
 });
 
+app.get("/api/mypage-summaries", async (_req, res, next) => {
+  try {
+    const data = await scraper.fetchMyPageSummaries();
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/mypage-new-information", async (_req, res, next) => {
+  try {
+    const data = await scraper.fetchMyPageNewInformationSummary();
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/unsubmitted-report-summary", async (_req, res, next) => {
+  try {
+    const data = await scraper.fetchUnsubmittedReportSummary();
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/unsubmitted-reports", async (_req, res, next) => {
   try {
     const data = await scraper.fetchUnsubmittedReports();
@@ -85,6 +112,84 @@ app.get("/api/received-office-memos", async (req, res, next) => {
       searchKeyword,
       categoryFilter,
     });
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/pending-appointments-summary", async (_req, res, next) => {
+  try {
+    const data = await scraper.fetchPendingAppointmentsSummary();
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/monthly-schedule", async (_req, res, next) => {
+  try {
+    const data = await scraper.fetchMonthlySchedule();
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/undone-questionnaires", async (_req, res, next) => {
+  try {
+    const data = await scraper.fetchUndoneQuestionnaires();
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/received-office-memo-details", async (req, res, next) => {
+  try {
+    const officeMemoId = getQueryString(req.query.officeMemoId);
+    if (!officeMemoId) {
+      res.status(400).json({ error: "officeMemoId is required" });
+      return;
+    }
+    const data = await scraper.fetchReceivedOfficeMemoDetail(officeMemoId);
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/courses-for-user", async (_req, res, next) => {
+  try {
+    const data = await scraper.fetchCoursesForUser();
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/course-lecture-details", async (req, res, next) => {
+  try {
+    const courseId = getQueryString(req.query.courseId);
+    const sessionRaw = getQueryString(req.query.session);
+    const session = sessionRaw ? Number.parseInt(sessionRaw, 10) : undefined;
+    if (sessionRaw && (!Number.isInteger(session) || (session ?? 0) < 1)) {
+      res.status(400).json({ error: "session must be a positive integer" });
+      return;
+    }
+    const data = await scraper.fetchCourseLectureDetails({
+      courseId,
+      session,
+    });
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/distribution-pdf-urls", async (_req, res, next) => {
+  try {
+    const data = await scraper.fetchDistributionPdfUrls();
     res.json(data);
   } catch (error) {
     next(error);
