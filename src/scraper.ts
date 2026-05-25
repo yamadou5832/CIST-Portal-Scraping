@@ -4,6 +4,7 @@ import { Browser, chromium, type BrowserContext, type Page } from "playwright";
 
 import type { AppConfig } from "./config.js";
 import {
+  type CourseLectureAttendanceResult,
   type CourseLectureDetail,
   type CourseSummary,
   type DistributionPdfGroup,
@@ -365,125 +366,178 @@ export class PortalScraperService {
     return this.withAuthenticatedPage(async (page) => {
       const details: ReceivedOfficeMemoDetail[] = [];
       for (const item of items) {
-        const detailUrl = new URL(`${this.config.portalUrl}/portal/OfficeMemo/ViewMemo`);
-        detailUrl.searchParams.set("officememoid", item.officeMemoId);
-        await page.goto(detailUrl.toString(), { waitUntil: "domcontentloaded" });
-
-        const parsed = await page.evaluate<{
-          author: string;
-          body: string;
-          postedText: string;
-          expiresText: string;
-          attachments: OfficeMemoAttachment[];
-        }>(String.raw`(() => {
-          const normalize = (value) => (value ?? "").replace(/\s+/g, " ").trim();
-          const attachments = [...document.querySelectorAll("a.filename, a[href*='/OfficeMemo/OfficeMemo/download']")]
-            .map((element) => ({
-              name: normalize(element.textContent),
-              url: element.getAttribute("href") ?? "",
-            }))
-            .filter((attachment) => attachment.name && attachment.url);
-
-          const bodyContainer =
-            document.querySelector(".main-contents") ??
-            document.querySelector("main") ??
-            document.body;
-          const bodyTextRaw = normalize(bodyContainer?.textContent);
-          const bodyText = normalize(bodyTextRaw.replace(/戻る|前へ|次へ|ブックマーク|要確認|未読|更新あり/g, " "));
-
-          const postedRegex = /(\d{4}\/\d{2}\/\d{2}(?:[（(][^)）]+[)）])?\s*\d{2}:\d{2})\s*に掲示/;
-          const expiresRegex = /(\d{4}\/\d{2}\/\d{2}(?:[（(][^)）]+[)）])?\s*\d{2}:\d{2})\s*まで掲示/;
-          const postedText = (bodyText.match(postedRegex) ?? [])[1] ?? "";
-          const expiresText = (bodyText.match(expiresRegex) ?? [])[1] ?? "";
-
-          let author = normalize(
-            document.querySelector(".main-head .name, .main-head .badge + span, .bi-person, .bi-person-fill")
-              ?.parentElement?.textContent,
-          );
-          if (!author) {
-            const metaLine = normalize(
-              [...document.querySelectorAll(".main-head, .card-header, .memo-header, p, div")]
-                .map((element) => element.textContent ?? "")
-                .find((text) => text.includes("に掲示") && text.includes("まで掲示")) ?? "",
-            );
-            const authorCandidate = metaLine
-              .replace(postedRegex, "")
-              .replace(expiresRegex, "")
-              .replace(/に掲示|まで掲示|[-|｜]/g, " ");
-            author = normalize(authorCandidate);
-          }
-          const bodyAuthor =
-            (bodyText.match(/重要\s+(.+?)\s+[^\s]+\s+に登録する/) ?? [])[1] ??
-            (bodyText.match(/重要\s+(.+?)\s+[^\s]+\s+ブックマーク/) ?? [])[1] ??
-            "";
-          if (bodyAuthor) {
-            author = normalize(bodyAuthor);
-          }
-          author = author.replace(/戻る|前へ|次へ|連絡掲示|受信|送信|掲示履歴|掲示を新規作成|連絡掲示の閲覧/g, "").trim();
-
-          return {
-            author,
-            body: bodyText,
-            postedText,
-            expiresText,
-            attachments,
-          };
-        })()`);
-
-        let postedAt: string | null = null;
-        let expiresAt: string | null = null;
-        if (parsed.postedText) {
-          try {
-            postedAt = formatDateTime(parsePortalDateTime(parsed.postedText));
-          } catch {
-            postedAt = null;
-          }
-        }
-        if (parsed.expiresText) {
-          try {
-            expiresAt = formatDateTime(parsePortalDateTime(parsed.expiresText));
-          } catch {
-            expiresAt = null;
-          }
-        }
-
-        details.push({
-          ...item,
-          author: parsed.author,
-          body: parsed.body,
-          posted_at: postedAt,
-          expires_at: expiresAt,
-          attachments: parsed.attachments.map((attachment) => ({
-            ...attachment,
-            url: new URL(attachment.url, this.config.portalUrl).toString(),
-          })),
-        });
+        details.push(await this.fetchReceivedOfficeMemoDetailPage(page, item));
       }
       return details;
     });
   }
 
   async fetchReceivedOfficeMemoDetail(officeMemoId: string): Promise<ReceivedOfficeMemoDetail> {
-    const { items } = await this.fetchReceivedOfficeMemos({ filter: "all" });
-    const target = items.find((item) => item.officeMemoId === officeMemoId);
-    if (!target) {
-      throw new Error(`officeMemoId not found: ${officeMemoId}`);
-    }
-    const details = await this.fetchReceivedOfficeMemoDetails({ filter: "all" });
-    const detail = details.find((item) => item.officeMemoId === officeMemoId);
-    if (!detail) {
-      throw new Error(`Failed to fetch detail for officeMemoId: ${officeMemoId}`);
-    }
-    return detail;
+    return this.withAuthenticatedPage((page) => this.fetchReceivedOfficeMemoDetailPage(page, { officeMemoId }));
   }
 
   async fetchMonthlySchedule(): Promise<MonthlySchedule> {
     return this.withAuthenticatedPage(async (page) => {
       await page.goto(`${this.config.portalUrl}/portal/Schedule/MonthlyScheduleViewer`, { waitUntil: "domcontentloaded" });
-      await page.waitForTimeout(1200);
-      return page.evaluate<MonthlySchedule>(String.raw`(() => {
+      await page
+        .waitForFunction(
+          String.raw`() => {
+            const maybeCalendar =
+              (typeof calendar !== "undefined" ? calendar : null) ??
+              window.calendar ??
+              window._calendar ??
+              null;
+            return maybeCalendar && typeof maybeCalendar.getEvents === "function";
+          }`,
+          null,
+          { timeout: 3000 },
+        )
+        .catch(() => undefined);
+      return page.evaluate<MonthlySchedule>(String.raw`(async () => {
         const normalize = (value) => (value ?? "").replace(/\s+/g, " ").trim();
+        const formatLocalDate = (value) => {
+          const date = new Date(value);
+          if (Number.isNaN(date.getTime())) {
+            return "";
+          }
+          return (
+            String(date.getFullYear()) +
+            "-" +
+            String(date.getMonth() + 1).padStart(2, "0") +
+            "-" +
+            String(date.getDate()).padStart(2, "0")
+          );
+        };
+        const getDatePart = (value) => {
+          if (!value) {
+            return "";
+          }
+          if (typeof value === "string") {
+            return (value.match(/^\d{4}-\d{2}-\d{2}/) ?? [])[0] ?? "";
+          }
+          return formatLocalDate(value);
+        };
+        const getPeriodLabel = (startStr, endStr) => {
+          if (!startStr) {
+            return "";
+          }
+
+          const extractTime = (isoStr) => isoStr?.split("T")[1]?.substring(0, 5);
+          const startTime = extractTime(startStr);
+          const endTime = extractTime(endStr);
+          if (!startTime || !endTime || (startTime === "00:00" && endTime >= "23:59")) {
+            return "";
+          }
+          const periodTimes = [
+            { label: 1, start: "09:00", end: "10:30" },
+            { label: 2, start: "10:45", end: "12:15" },
+            { label: 3, start: "13:15", end: "14:45" },
+            { label: 4, start: "15:00", end: "16:30" },
+            { label: 5, start: "16:45", end: "18:15" },
+          ];
+
+          let startPeriod = null;
+          let endPeriod = null;
+          for (const period of periodTimes) {
+            if (startTime <= period.start && startPeriod === null) {
+              startPeriod = period.label;
+            }
+            if (endTime >= period.end) {
+              endPeriod = period.label;
+            }
+          }
+
+          if (startPeriod === null || endPeriod === null) {
+            const quickMatch = periodTimes.find((period) => period.start === startTime);
+            return quickMatch ? "【" + quickMatch.label + "限】" : "";
+          }
+
+          return startPeriod === endPeriod
+            ? "【" + startPeriod + "限】"
+            : "【" + startPeriod + "-" + endPeriod + "限】";
+        };
         const month = normalize(document.querySelector(".fc-toolbar-title")?.textContent);
+        const getCalendar = () =>
+          (typeof calendar !== "undefined" ? calendar : null) ??
+          window.calendar ??
+          window._calendar ??
+          null;
+        const buildEvent = (event) => {
+          const start = event.startStr || event.start || "";
+          const end = event.endStr || event.end || "";
+          const date = getDatePart(start);
+          const title = normalize(event.title ?? event.schedulename ?? "");
+          const id = String(event.id ?? event.scheduleid ?? "");
+          const scheduleId = String(event.scheduleid ?? event.extendedProps?.scheduleid ?? id);
+          const classNames = Array.isArray(event.classNames) ? event.classNames.join(" ") : "";
+          const cssClass = normalize(event.className ?? event.categoryValue ?? classNames);
+          if (!date || !title) {
+            return null;
+          }
+          return {
+            date,
+            title,
+            id,
+            scheduleId,
+            start,
+            end,
+            periodLabel: getPeriodLabel(start, end),
+            cssClass,
+          };
+        };
+        const maybeCalendar = getCalendar();
+        const eventsFromApi = [];
+        const holidaysFromApi = [];
+        if (maybeCalendar?.view?.activeStart && maybeCalendar?.view?.activeEnd) {
+          const start = formatLocalDate(maybeCalendar.view.activeStart) + "T00:00:00";
+          const endDate = new Date(maybeCalendar.view.activeEnd);
+          endDate.setDate(endDate.getDate() - 1);
+          const end = formatLocalDate(endDate) + "T23:59:59";
+          const params = new URLSearchParams({ start, end });
+
+          try {
+            const url = contextPath + "/Schedule/MonthlyScheduleViewer/getEvents?" + params.toString();
+            const response = await fetch(url, { headers: { Accept: "application/json" } });
+            if (response.ok) {
+              const data = await response.json();
+              for (const event of Array.isArray(data) ? data : []) {
+                const parsed = buildEvent(event);
+                if (parsed) {
+                  eventsFromApi.push(parsed);
+                }
+              }
+            }
+          } catch {
+            // fall back to FullCalendar/DOM extraction below
+          }
+
+          try {
+            const url = contextPath + "/Schedule/MonthlyScheduleViewer/getHoliday?" + params.toString();
+            const response = await fetch(url, { headers: { Accept: "application/json" } });
+            if (response.ok) {
+              const data = await response.json();
+              for (const holiday of Array.isArray(data) ? data : []) {
+                const parsed = buildEvent({
+                  ...holiday,
+                  id: holiday.id ?? "",
+                  scheduleid: holiday.scheduleid ?? "",
+                  className: holiday.className ?? holiday.cssClass ?? "fc-hol",
+                });
+                if (parsed) {
+                  holidaysFromApi.push({
+                    ...parsed,
+                    id: "",
+                    scheduleId: "",
+                    periodLabel: "",
+                    cssClass: parsed.cssClass || "fc-hol",
+                  });
+                }
+              }
+            }
+          } catch {
+            // holidays are optional; keep regular schedule results if this fails
+          }
+        }
         const eventsFromDom = [...document.querySelectorAll(".fc-daygrid-event, .fc-event, .fc-list-event")]
           .map((element) => {
             const dayCell =
@@ -504,25 +558,21 @@ export class PortalScraperService {
           .filter((event) => event.date && event.title);
 
         const eventsFromWindow = [];
-        const maybeCalendar = window.calendar ?? window._calendar ?? null;
         if (maybeCalendar && typeof maybeCalendar.getEvents === "function") {
           try {
             for (const event of maybeCalendar.getEvents()) {
-              const start = event.start ? new Date(event.start) : null;
-              const date = start
-                ? String(start.getFullYear()) +
-                  "-" +
-                  String(start.getMonth() + 1).padStart(2, "0") +
-                  "-" +
-                  String(start.getDate()).padStart(2, "0")
-                : "";
-              const title = normalize(event.title ?? "");
-              if (date && title) {
-                eventsFromWindow.push({
-                  date,
-                  title,
-                  cssClass: normalize((event.classNames ?? []).join(" ")),
-                });
+              const start = event.startStr || (event.start ? event.start.toISOString() : "");
+              const end = event.endStr || (event.end ? event.end.toISOString() : "");
+              const parsed = buildEvent({
+                id: event.id,
+                title: event.title,
+                start,
+                end,
+                classNames: event.classNames,
+                extendedProps: event.extendedProps,
+              });
+              if (parsed) {
+                eventsFromWindow.push(parsed);
               }
             }
           } catch {
@@ -530,11 +580,21 @@ export class PortalScraperService {
           }
         }
 
-        const merged = [...eventsFromDom, ...eventsFromWindow];
+        const scheduleEvents = eventsFromApi.length > 0 ? eventsFromApi : eventsFromWindow.length > 0 ? eventsFromWindow : eventsFromDom;
+        const merged = [...scheduleEvents, ...holidaysFromApi];
         const deduped = [];
         const seen = new Set();
         for (const event of merged) {
-          const key = event.date + "|" + event.title + "|" + event.cssClass;
+          const key =
+            (event.scheduleId || event.id || "") +
+            "|" +
+            event.date +
+            "|" +
+            event.title +
+            "|" +
+            (event.start || "") +
+            "|" +
+            event.cssClass;
           if (seen.has(key)) {
             continue;
           }
@@ -616,6 +676,22 @@ export class PortalScraperService {
           sessions: LectureSessionDetail[];
         }>(String.raw`(() => {
           const normalize = (value) => (value ?? "").replace(/\s+/g, " ").trim();
+          const normalizeMultiline = (value) =>
+            (value ?? "")
+              .replace(/\r/g, "")
+              .split("\n")
+              .map((line) => line.replace(/\s+/g, " ").trim())
+              .filter(Boolean)
+              .join("\n");
+          const emptyAttendanceRegistration = (lectureId = "") => ({
+            available: false,
+            lectureId,
+            passwordInputId: "",
+            passwordInputName: "",
+            submitAction: "",
+            submitButtonText: "",
+            submitDisabled: false,
+          });
           const main = document.querySelector("main") ?? document.body;
           const courseName = normalize(main.querySelector("h2.main-title")?.textContent);
           const mainHeadText = normalize(main.querySelector(".main-head")?.textContent);
@@ -629,6 +705,71 @@ export class PortalScraperService {
               ?.parentElement?.textContent,
           );
 
+          const sessionsFromLectureItems = [...document.querySelectorAll(".lecture-item[data-lecture-id], .lecture-item[id]")]
+            .map((container) => {
+              const headerText = normalize(container.querySelector(":scope > .card-header")?.textContent);
+              const headerMatch =
+                headerText.match(/^(\d+\s*回目の講義)(?:\s+通常授業)?\s+(\d{1,2}\/\d{1,2}(?:[（(][^)）]+[)）])?)\s+(\d+講時)\s+(.+)$/) ??
+                [];
+              const lectureId = normalize(container.getAttribute("data-lecture-id") ?? container.id);
+              const title = normalize(headerMatch[1] ?? headerText.match(/^\d+\s*回目の講義/)?.[0] ?? headerText);
+              const scheduleDate = normalize(headerMatch[2] ?? "");
+              const period = normalize(headerMatch[3] ?? "");
+              const classroom = normalize(headerMatch[4] ?? "");
+
+              const sectionCards = [...container.querySelectorAll(".card")].filter((card) => card !== container);
+              const findSection = (label) =>
+                sectionCards.find((card) => normalize(card.querySelector(":scope > .card-header")?.textContent).includes(label));
+              const contentSection = findSection("授業内容");
+              const attachmentSection = findSection("添付資料");
+              const attendanceSection = findSection("出席");
+              const description = normalizeMultiline(
+                contentSection?.querySelector(":scope > .card-body")?.innerText ??
+                contentSection?.querySelector(":scope > .card-body")?.textContent ??
+                "",
+              );
+              const attendanceStatus = normalize(
+                attendanceSection?.querySelector("[id^='attendanceResult_']")?.textContent ??
+                (normalize(attendanceSection?.textContent).match(/あなたの出席登録状況：\s*([^\s]+)/) ?? [])[1] ??
+                "",
+              );
+              const passwordInput = attendanceSection?.querySelector("input[type='password'], input[id^='password_']");
+              const submitButton = [...(attendanceSection?.querySelectorAll("button") ?? [])].find((button) =>
+                (button.getAttribute("onclick") ?? "").includes("attendanceClick"),
+              );
+              const submitAction = submitButton?.getAttribute("onclick") ?? "";
+              const attendanceRegistration = passwordInput || submitButton
+                ? {
+                    available: true,
+                    lectureId,
+                    passwordInputId: passwordInput?.getAttribute("id") ?? "",
+                    passwordInputName: passwordInput?.getAttribute("name") ?? "",
+                    submitAction,
+                    submitButtonText: normalize(submitButton?.textContent),
+                    submitDisabled: submitButton?.hasAttribute("disabled") ?? false,
+                  }
+                : emptyAttendanceRegistration(lectureId);
+              const attachments = [...(attachmentSection?.querySelectorAll("a[href*='download'], a.filename[href]") ?? [])]
+                .map((element) => ({
+                  name: normalize(element.textContent),
+                  url: element.getAttribute("href") ?? "",
+                }))
+                .filter((attachment) => attachment.name && attachment.url);
+
+              return {
+                lectureId,
+                title,
+                schedule_date: scheduleDate,
+                period,
+                classroom,
+                description,
+                attendance_status: attendanceStatus,
+                attendance_registration: attendanceRegistration,
+                attachments,
+              };
+            })
+            .filter((session) => session.title);
+
           const sessionTitleElements = [...document.querySelectorAll("h3, h4, h5, .card-header, .accordion-button, strong, b")]
             .filter((element) => /^\d+\s*回目の講義$/.test(normalize(element.textContent)));
           const sessionsFromHeadings = sessionTitleElements
@@ -638,6 +779,9 @@ export class PortalScraperService {
                 titleElement.closest(".card, .accordion-item, .lecture-item, .mb-3, section, li, tr") ??
                 titleElement.parentElement ??
                 titleElement;
+              const lectureId =
+                normalize(container.getAttribute("data-lecture-id") ?? container.id) ||
+                normalize(container.querySelector("a[href*='lectureId=']")?.getAttribute("href")?.match(/[?&]lectureId=([^&]+)/)?.[1]);
               const body = normalize(container.textContent);
               const scheduleDate = (body.match(/(\d{1,2}\/\d{1,2}(?:[（(][^)）]+[)）])?)/) ?? [])[1] ?? "";
               const period = (body.match(/([0-9]+講時)/) ?? [])[1] ?? "";
@@ -655,12 +799,14 @@ export class PortalScraperService {
                 .filter((attachment) => attachment.name && attachment.url);
 
               return {
+                lectureId,
                 title,
                 schedule_date: scheduleDate,
                 period,
                 classroom,
                 description,
                 attendance_status: attendanceStatus,
+                attendance_registration: emptyAttendanceRegistration(lectureId),
                 attachments,
               };
             })
@@ -694,18 +840,27 @@ export class PortalScraperService {
           while ((bodyMatch = sessionPattern.exec(bodyText)) !== null) {
             const [, title, scheduleDate, period, classroom, descriptionRaw, attendanceStatus] = bodyMatch;
             sessionsFromBody.push({
+              lectureId: attachmentGroups[bodyIndex]?.[0]?.url.match(/[?&]lectureId=([^&]+)/)?.[1] ?? "",
               title: normalize(title),
               schedule_date: normalize(scheduleDate),
               period: normalize(period),
               classroom: normalize(classroom),
               description: normalize(descriptionRaw),
               attendance_status: normalize(attendanceStatus),
+              attendance_registration: emptyAttendanceRegistration(
+                attachmentGroups[bodyIndex]?.[0]?.url.match(/[?&]lectureId=([^&]+)/)?.[1] ?? "",
+              ),
               attachments: (attachmentGroups[bodyIndex] ?? []).filter((attachment) => attachment.name && attachment.url),
             });
             bodyIndex += 1;
           }
 
-          const sessions = sessionsFromHeadings.length > 0 ? sessionsFromHeadings : sessionsFromBody;
+          const sessions =
+            sessionsFromLectureItems.length > 0
+              ? sessionsFromLectureItems
+              : sessionsFromHeadings.length > 0
+                ? sessionsFromHeadings
+                : sessionsFromBody;
           const deduped = [];
           const seen = new Set();
           for (const session of sessions) {
@@ -777,6 +932,61 @@ export class PortalScraperService {
       }
 
       return details;
+    });
+  }
+
+  async registerCourseLectureAttendance(options: { lectureId: string; password: string }): Promise<CourseLectureAttendanceResult> {
+    const lectureId = options.lectureId.trim();
+    const password = options.password.trim();
+    if (!lectureId) {
+      throw new Error("lectureId is required");
+    }
+    if (!password) {
+      throw new Error("password is required");
+    }
+
+    return this.withAuthenticatedPage(async (page) => {
+      const csrf = await page.evaluate<{ header: string; token: string }>(String.raw`(() => ({
+        header: document.querySelector("meta[name='_csrf_header']")?.getAttribute("content") ?? "",
+        token: document.querySelector("meta[name='_csrf']")?.getAttribute("content") ?? "",
+      }))()`);
+      if (!csrf.header || !csrf.token) {
+        throw new Error("Failed to resolve CSRF token");
+      }
+
+      const response = await page.context().request.post(
+        `${this.config.portalUrl}/portal/Lecture/ViewScheduleOfLectures/saveAttendance`,
+        {
+          form: {
+            lectureId,
+            password,
+          },
+          headers: {
+            [csrf.header]: csrf.token,
+            Accept: "application/json",
+          },
+        },
+      );
+
+      let raw: unknown;
+      try {
+        raw = await response.json();
+      } catch {
+        raw = await response.text();
+      }
+
+      if (!response.ok()) {
+        throw new Error(`Attendance registration failed: ${response.status()}`);
+      }
+
+      const records = Array.isArray(raw) ? raw : [];
+      const errorMessage = records.map((record) => record?.restControllerErrorMessage ?? "").join("");
+      const infoMessage = records.map((record) => record?.restControllerInfoMessage ?? "").join("");
+      return {
+        success: !errorMessage,
+        message: errorMessage || infoMessage,
+        raw,
+      };
     });
   }
 
@@ -983,6 +1193,140 @@ export class PortalScraperService {
     url.searchParams.set("searchKeyword", searchKeyword);
     url.searchParams.set("c_filter", categoryFilter);
     return url.toString();
+  }
+
+  private buildReceivedOfficeMemoDetailUrl(officeMemoId: string): string {
+    const url = new URL(`${this.config.portalUrl}/portal/OfficeMemo/ViewMemo`);
+    url.searchParams.set("officememoid", officeMemoId);
+    return url.toString();
+  }
+
+  private async fetchReceivedOfficeMemoDetailPage(
+    page: Page,
+    item: Pick<ReceivedOfficeMemo, "officeMemoId"> & Partial<ReceivedOfficeMemo>,
+  ): Promise<ReceivedOfficeMemoDetail> {
+    await page.goto(this.buildReceivedOfficeMemoDetailUrl(item.officeMemoId), { waitUntil: "domcontentloaded" });
+
+    const parsed = await page.evaluate<{
+      title: string;
+      author: string;
+      category: string;
+      body: string;
+      postedText: string;
+      expiresText: string;
+      attachments: OfficeMemoAttachment[];
+      isBookmarked: boolean;
+      isReviewNeeded: boolean;
+      isUnread: boolean;
+      isUpdated: boolean;
+      isImportant: boolean;
+    }>(String.raw`(() => {
+      const normalize = (value) => (value ?? "").replace(/\s+/g, " ").trim();
+      const normalizeBody = (value) =>
+        (value ?? "")
+          .replace(/\r/g, "")
+          .split("\n")
+          .map((line) => line.replace(/\s+/g, " ").trim())
+          .filter((line) => line.length > 0)
+          .join("\n");
+
+      const card = document.querySelector(".main-contents .card.mb-3") ?? document.querySelector(".main-contents .card");
+      const title = normalize(card?.querySelector(".card-header")?.textContent);
+
+      const summaryBody = [...(card?.querySelectorAll(".card-body") ?? [])].find((element) =>
+        element.classList.contains("border-bottom"),
+      );
+      const author =
+        normalize(summaryBody?.querySelector(".bi-person, .bi-person-fill")?.parentElement?.textContent) ||
+        normalize(summaryBody?.querySelector(".row .col-auto")?.textContent);
+      const category =
+        normalize(summaryBody?.querySelector(".bi-tag")?.parentElement?.textContent).replace(/^タグ\s*/, "") ||
+        "---";
+
+      const contentBody = [...(card?.querySelectorAll(".card-body") ?? [])].find(
+        (element) => !element.classList.contains("border-bottom") && !element.classList.contains("border-top"),
+      );
+      const body = normalizeBody(contentBody?.innerText ?? contentBody?.textContent ?? "");
+
+      const attachmentBody = [...(card?.querySelectorAll(".card-body.border-top") ?? [])].find((element) =>
+        normalize(element.textContent).includes("添付ファイル"),
+      );
+      const attachments = [...(attachmentBody?.querySelectorAll("a.filename, a[href*='/OfficeMemo/OfficeMemo/download']") ?? [])]
+        .map((element) => ({
+          name: normalize(element.textContent),
+          url: element.getAttribute("href") ?? "",
+        }))
+        .filter((attachment) => attachment.name && attachment.url);
+
+      const postedBody = [...(card?.querySelectorAll(".card-body.border-top") ?? [])].find((element) =>
+        normalize(element.textContent).includes("に掲示"),
+      );
+      const postedText = normalize(postedBody?.querySelector(".bi-clock")?.nextElementSibling?.textContent);
+      const expiresText = normalize(postedBody?.querySelector(".bi-hourglass-bottom")?.nextElementSibling?.textContent);
+
+      const badgeTexts = [...document.querySelectorAll(".badge")]
+        .map((element) => normalize(element.textContent).replace(/\s+/g, ""))
+        .filter((text) => text.length > 0);
+
+      return {
+        title,
+        author,
+        category,
+        body,
+        postedText,
+        expiresText,
+        attachments,
+        isBookmarked: Boolean(card?.querySelector("i.bi-star-fill")),
+        isReviewNeeded: badgeTexts.some((text) => text.includes("要確認")),
+        isUnread: badgeTexts.some((text) => text.includes("未読")),
+        isUpdated: badgeTexts.some((text) => text.includes("更新あり")),
+        isImportant: normalize(summaryBody?.textContent).includes("重要"),
+      };
+    })()`);
+
+    if (!parsed.title) {
+      throw new Error(`officeMemoId not found: ${item.officeMemoId}`);
+    }
+
+    let postedAt: string | null = null;
+    let expiresAt: string | null = null;
+    let postedDate: Date | null = null;
+    if (parsed.postedText) {
+      try {
+        postedDate = parsePortalDateTime(parsed.postedText);
+        postedAt = formatDateTime(postedDate);
+      } catch {
+        postedDate = null;
+        postedAt = null;
+      }
+    }
+    if (parsed.expiresText) {
+      try {
+        expiresAt = formatDateTime(parsePortalDateTime(parsed.expiresText));
+      } catch {
+        expiresAt = null;
+      }
+    }
+
+    return {
+      title: item.title ?? parsed.title,
+      officeMemoId: item.officeMemoId,
+      category: item.category ?? parsed.category,
+      date: item.date ?? postedDate ?? new Date(0),
+      isBookmarked: item.isBookmarked ?? parsed.isBookmarked,
+      isReviewNeeded: item.isReviewNeeded ?? parsed.isReviewNeeded,
+      isUnread: item.isUnread ?? parsed.isUnread,
+      isUpdated: item.isUpdated ?? parsed.isUpdated,
+      isImportant: item.isImportant ?? parsed.isImportant,
+      author: parsed.author,
+      body: parsed.body,
+      posted_at: postedAt,
+      expires_at: expiresAt,
+      attachments: parsed.attachments.map((attachment) => ({
+        ...attachment,
+        url: new URL(attachment.url, this.config.portalUrl).toString(),
+      })),
+    };
   }
 
   private async withAuthenticatedPage<T>(handler: (page: Page) => Promise<T>): Promise<T> {

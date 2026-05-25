@@ -67,6 +67,11 @@ export interface MonthlyScheduleEvent {
   date: string;
   title: string;
   cssClass: string;
+  id?: string;
+  scheduleId?: string;
+  start?: string;
+  end?: string;
+  periodLabel?: string;
 }
 
 export interface MonthlySchedule {
@@ -89,14 +94,32 @@ export interface LectureAttachment {
   url: string;
 }
 
+export interface LectureAttendanceRegistration {
+  available: boolean;
+  lectureId: string;
+  passwordInputId: string;
+  passwordInputName: string;
+  submitAction: string;
+  submitButtonText: string;
+  submitDisabled: boolean;
+}
+
 export interface LectureSessionDetail {
+  lectureId: string;
   title: string;
   schedule_date: string;
   period: string;
   classroom: string;
   description: string;
   attendance_status: string;
+  attendance_registration: LectureAttendanceRegistration;
   attachments: LectureAttachment[];
+}
+
+export interface CourseLectureAttendanceResult {
+  success: boolean;
+  message: string;
+  raw: unknown;
 }
 
 export interface CourseLectureDetail {

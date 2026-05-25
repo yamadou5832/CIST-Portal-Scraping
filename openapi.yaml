@@ -1,0 +1,1109 @@
+openapi: 3.0.3
+info:
+  title: CIST Portal Scraping API
+  description: CIST ポータルサイトからスクレイピングしたデータを取得する API の仕様書です。
+  version: 1.0.0
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+servers:
+  - url: http://localhost:3000
+    description: ローカル開発サーバー
+security:
+  - {}
+paths:
+  /health:
+    get:
+      summary: ヘルスチェック
+      description: サーバーが正常に起動しているか確認します。
+      operationId: checkHealth
+      responses:
+        '200':
+          description: 正常
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '400':
+          description: クライアントエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/mypage:
+    get:
+      summary: マイページデータ一括取得
+      description: 新着情報、レポートサマリー、未提出レポート、振り返りへの返信、時間割などのマイページデータを一括で取得します。
+      operationId: getMyPage
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyPageData'
+        '400':
+          description: リクエスト不正
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/mypage-summaries:
+    get:
+      summary: マイページサマリー取得
+      description: マイページの新着情報サマリーと未提出レポートのサマリーを取得します。
+      operationId: getMyPageSummaries
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - new_information
+                  - unsubmitted_report_summary
+                properties:
+                  new_information:
+                    $ref: '#/components/schemas/MyPageNewInformationSummary'
+                  unsubmitted_report_summary:
+                    $ref: '#/components/schemas/UnsubmittedReportSummary'
+        '400':
+          description: リクエスト不正
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/mypage-new-information:
+    get:
+      summary: マイページ新着情報サマリー取得
+      description: 連絡通知、スケジュール、アンケートなどの新着未処理件数のサマリーを取得します。
+      operationId: getMyPageNewInformation
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyPageNewInformationSummary'
+        '400':
+          description: リクエスト不正
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/unsubmitted-report-summary:
+    get:
+      summary: 未提出レポートサマリー取得
+      description: 期限が1週間以内の未提出レポート数と、全体の未提出レポート数のサマリーを取得します。
+      operationId: getUnsubmittedReportSummary
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnsubmittedReportSummary'
+        '400':
+          description: リクエスト不正
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/unsubmitted-reports:
+    get:
+      summary: 未提出レポート一覧取得
+      description: 未提出レポートの詳細一覧を取得します。
+      operationId: getUnsubmittedReports
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UnsubmittedReport'
+        '400':
+          description: リクエスト不正
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/reflection-replies:
+    get:
+      summary: 振り返り（授業コメントなど）の返信一覧取得
+      description: 授業等の振り返りに対して教員などから送信された返信の一覧を取得します。
+      operationId: getReflectionReplies
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReflectionReply'
+        '400':
+          description: リクエスト不正
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/timetable:
+    get:
+      summary: 時間割一覧取得
+      description: 今日または指定期間の時間割情報を取得します。
+      operationId: getTimetable
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TimetableEntry'
+        '400':
+          description: リクエスト不正
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/received-office-memos:
+    get:
+      summary: 受信連絡通知一覧取得
+      description: フィルタ、検索キーワード、カテゴリ、ページを指定して受信した連絡通知の一覧をページネーション付きで取得します。
+      operationId: getReceivedOfficeMemos
+      parameters:
+        - name: filter
+          in: query
+          description: '抽出フィルタ ("all", "unread", "read", "star")'
+          required: true
+          schema:
+            $ref: '#/components/schemas/OfficeMemoFilter'
+        - name: searchKeyword
+          in: query
+          description: 検索用キーワード
+          required: false
+          schema:
+            type: string
+            default: ""
+        - name: c_filter
+          in: query
+          description: カテゴリによる抽出フィルタ
+          required: false
+          schema:
+            type: string
+            default: "c_all"
+        - name: page
+          in: query
+          description: 取得ページ番号（1から開始）
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedReceivedOfficeMemos'
+        '400':
+          description: リクエスト不正（パラメータエラーなど）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/pending-appointments-summary:
+    get:
+      summary: 保留中のアポイントメントサマリー取得
+      description: 保留中の面談や予定予約の件数および保留中アイテムの有無を取得します。
+      operationId: getPendingAppointmentsSummary
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingAppointmentSummary'
+        '400':
+          description: リクエスト不正
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/monthly-schedule:
+    get:
+      summary: 月間スケジュール取得
+      description: スケジュールに登録されているイベント月間の一覧を取得します。
+      operationId: getMonthlySchedule
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonthlySchedule'
+        '400':
+          description: リクエスト不正
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/undone-questionnaires:
+    get:
+      summary: 未回答アンケート一覧取得
+      description: まだ回答していないアクティブなアンケートの一覧を取得します。
+      operationId: getUndoneQuestionnaires
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UndoneQuestionnaire'
+        '400':
+          description: リクエスト不正
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/received-office-memo-details:
+    get:
+      summary: 受信連絡詳細取得
+      description: 指定された `officeMemoId` を持つ連絡通知の本文や添付ファイル等を含む詳細情報を取得します。
+      operationId: getReceivedOfficeMemoDetails
+      parameters:
+        - name: officeMemoId
+          in: query
+          description: 連絡通知の一意なID
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceivedOfficeMemoDetail'
+        '400':
+          description: リクエスト不正（ID未指定など）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/courses-for-user:
+    get:
+      summary: ユーザ履修講義一覧取得
+      description: ユーザが履修中、または関連する講義（コース）の一覧を取得します。
+      operationId: getCoursesForUser
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CourseSummary'
+        '400':
+          description: リクエスト不正
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/course-lecture-details:
+    get:
+      summary: 講義詳細一覧取得
+      description: 指定された講義 (`courseId`) の全セッション、または特定セッション of 講義詳細情報を取得します。
+      operationId: getCourseLectureDetails
+      parameters:
+        - name: courseId
+          in: query
+          description: 講義（コース）の一意なID
+          required: false
+          schema:
+            type: string
+        - name: session
+          in: query
+          description: セッション回数（正の整数）
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CourseLectureDetail'
+        '400':
+          description: リクエスト不正（セッションパラメータ不正など）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/course-lecture-attendance:
+    post:
+      summary: 講義出席登録
+      description: 指定した講義回IDと出席パスワードで出席登録を行います。
+      operationId: registerCourseLectureAttendance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CourseLectureAttendanceRequest'
+      responses:
+        '200':
+          description: 出席登録成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseLectureAttendanceResult'
+        '400':
+          description: リクエスト不正、またはポータル側の出席登録エラー
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/CourseLectureAttendanceResult'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/distribution-pdf-urls:
+    get:
+      summary: 配布PDF of URLリスト取得
+      description: 学生向け等にポータルで配布されているPDFファイルのジャンル別URL一覧を取得します。
+      operationId: getDistributionPdfUrls
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DistributionPdfGroup'
+        '400':
+          description: リクエスト不正
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    UnsubmittedReport:
+      type: object
+      required:
+        - course_name
+        - courseId
+        - report_name
+        - lectureId
+        - start_at
+        - end_at
+      properties:
+        course_name:
+          type: string
+          description: 講義名
+        courseId:
+          type: string
+          description: コースID
+        report_name:
+          type: string
+          description: レポート課題名
+        lectureId:
+          type: string
+          description: 講義回等のID
+        start_at:
+          type: string
+          format: date-time
+          description: 提出開始日時
+        end_at:
+          type: string
+          format: date-time
+          description: 提出期限日時
+
+    ReflectionReply:
+      type: object
+      required:
+        - date
+        - course_name
+        - courseId
+        - report_name
+        - lectureId
+      properties:
+        date:
+          type: string
+          description: 返信日時または日付
+        course_name:
+          type: string
+          description: 講義名
+        courseId:
+          type: string
+          description: コースID
+        report_name:
+          type: string
+          description: 振り返りの対象となった課題・レポート名
+        lectureId:
+          type: string
+          description: 講義ID
+
+    TimetableEntry:
+      type: object
+      required:
+        - classroom
+        - course_name
+        - courseId
+        - datetime
+        - period
+      properties:
+        classroom:
+          type: string
+          description: 教室名
+        course_name:
+          type: string
+          description: 講義名
+        courseId:
+          type: string
+          description: コースID
+        datetime:
+          type: string
+          description: 講義日時
+        period:
+          type: integer
+          description: 時限（1-indexed）
+
+    MyPageNewInformationSummary:
+      type: object
+      required:
+        - required_office_memo_count
+        - unread_office_memo_count
+        - unaccepted_schedule_count
+        - unanswered_questionnaire_count
+      properties:
+        required_office_memo_count:
+          type: integer
+          description: 要確認の連絡通知件数
+        unread_office_memo_count:
+          type: integer
+          description: 未読の連絡通知件数
+        unaccepted_schedule_count:
+          type: integer
+          description: 未承認のスケジュール調整件数
+        unanswered_questionnaire_count:
+          type: integer
+          description: 未回答のアンケート件数
+
+    UnsubmittedReportSummary:
+      type: object
+      required:
+        - due_within_week_count
+        - total_count
+      properties:
+        due_within_week_count:
+          type: integer
+          description: 提出期限が1週間以内の未提出レポート数
+        total_count:
+          type: integer
+          description: 総未提出レポート数
+
+    PendingAppointmentSummary:
+      type: object
+      required:
+        - pending_count
+        - has_pending_items
+      properties:
+        pending_count:
+          type: integer
+          description: 保留中の面談等のアポイントメント数
+        has_pending_items:
+          type: boolean
+          description: 保留中アポイントメントが存在するかどうか
+
+    UndoneQuestionnaire:
+      type: object
+      required:
+        - questionnaireId
+        - title
+        - deadline_at
+        - is_closed
+        - is_anonymous
+        - is_repeatable
+        - category
+      properties:
+        questionnaireId:
+          type: string
+          description: アンケートID
+        title:
+          type: string
+          description: アンケートのタイトル
+        deadline_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 回答締め切り日時（設定されていない場合は null）
+        is_closed:
+          type: boolean
+          description: 締め切られているか
+        is_anonymous:
+          type: boolean
+          description: 匿名回答であるか
+        is_repeatable:
+          type: boolean
+          description: 再回答可能であるか
+        category:
+          type: string
+          description: カテゴリ
+
+    OfficeMemoAttachment:
+      type: object
+      required:
+        - name
+        - url
+      properties:
+        name:
+          type: string
+          description: ファイル名
+        url:
+          type: string
+          format: uri
+          description: ダウンロードURL
+
+    ReceivedOfficeMemo:
+      type: object
+      required:
+        - title
+        - officeMemoId
+        - category
+        - date
+        - isBookmarked
+        - isReviewNeeded
+        - isUnread
+        - isUpdated
+        - isImportant
+      properties:
+        title:
+          type: string
+          description: 連絡通知のタイトル
+        officeMemoId:
+          type: string
+          description: 連絡通知の一意なID
+        category:
+          type: string
+          description: 分類カテゴリ
+        date:
+          type: string
+          format: date-time
+          description: 配信日時
+        isBookmarked:
+          type: boolean
+          description: ブックマーク（お気に入り）されているか
+        isReviewNeeded:
+          type: boolean
+          description: 要確認（フラグ）状態であるか
+        isUnread:
+          type: boolean
+          description: 未読状態であるか
+        isUpdated:
+          type: boolean
+          description: 更新された連絡であるか
+        isImportant:
+          type: boolean
+          description: 重要マークがついているか
+
+    ReceivedOfficeMemoDetail:
+      allOf:
+        - $ref: '#/components/schemas/ReceivedOfficeMemo'
+        - type: object
+          required:
+            - author
+            - body
+            - posted_at
+            - expires_at
+            - attachments
+          properties:
+            author:
+              type: string
+              description: 発信者（教職員・部署名など）
+            body:
+              type: string
+              description: 連絡本文（プレーンテキスト、またはHTML）
+            posted_at:
+              type: string
+              format: date-time
+              nullable: true
+              description: 掲載日時
+            expires_at:
+              type: string
+              format: date-time
+              nullable: true
+              description: 掲載終了日時
+            attachments:
+              type: array
+              items:
+                $ref: '#/components/schemas/OfficeMemoAttachment'
+              description: 添付ファイルの一覧
+
+    MonthlyScheduleEvent:
+      type: object
+      required:
+        - date
+        - title
+        - cssClass
+      properties:
+        date:
+          type: string
+          description: "イベントの日付 (Format: YYYY-MM-DD)"
+        title:
+          type: string
+          description: イベントのタイトル
+        cssClass:
+          type: string
+          description: 表示用のCSSクラス名
+        id:
+          type: string
+          description: FullCalendarイベントID
+        scheduleId:
+          type: string
+          description: ポータル予定ID。存在しない場合はFullCalendarイベントID
+        start:
+          type: string
+          description: "イベント開始日時 (FullCalendar startStr)"
+        end:
+          type: string
+          description: "イベント終了日時 (FullCalendar endStr)"
+        periodLabel:
+          type: string
+          description: "講時ラベル (例: 【1-2限】)"
+
+    MonthlySchedule:
+      type: object
+      required:
+        - month
+        - events
+      properties:
+        month:
+          type: string
+          description: "スケジュールの月 (Format: YYYY-MM)"
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/MonthlyScheduleEvent'
+          description: スケジュールに含まれるイベントリスト
+
+    CourseSummary:
+      type: object
+      required:
+        - courseId
+        - code
+        - department
+        - grade
+        - semester
+        - category
+        - course_name
+      properties:
+        courseId:
+          type: string
+          description: 講義ID
+        code:
+          type: string
+          description: 講義コード
+        department:
+          type: string
+          description: 開講学科
+        grade:
+          type: string
+          description: 対象学年
+        semester:
+          type: string
+          description: 開講学期（前期・後期など）
+        category:
+          type: string
+          description: 科目区分
+        course_name:
+          type: string
+          description: 講義科目名
+
+    LectureAttachment:
+      type: object
+      required:
+        - name
+        - url
+      properties:
+        name:
+          type: string
+          description: 資料・ファイル名
+        url:
+          type: string
+          format: uri
+          description: ファイルの参照・ダウンロードURL
+
+    LectureSessionDetail:
+      type: object
+      required:
+        - lectureId
+        - title
+        - schedule_date
+        - period
+        - classroom
+        - description
+        - attendance_status
+        - attendance_registration
+        - attachments
+      properties:
+        lectureId:
+          type: string
+          description: 講義回ID。出席登録や添付資料取得で使用します。
+        title:
+          type: string
+          description: "各回講義のタイトル（例: 第1回 講義イントロダクション）"
+        schedule_date:
+          type: string
+          description: 開講日・予定日
+        period:
+          type: string
+          description: 講義時限
+        classroom:
+          type: string
+          description: 実施教室
+        description:
+          type: string
+          description: 講義内容説明・連絡事項
+        attendance_status:
+          type: string
+          description: 出欠ステータス
+        attendance_registration:
+          $ref: '#/components/schemas/LectureAttendanceRegistration'
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/LectureAttachment'
+          description: 講義関連の添付ファイル・資料一覧
+
+    LectureAttendanceRegistration:
+      type: object
+      required:
+        - available
+        - lectureId
+        - passwordInputId
+        - passwordInputName
+        - submitAction
+        - submitButtonText
+        - submitDisabled
+      properties:
+        available:
+          type: boolean
+          description: 出席登録フォームが表示されているか
+        lectureId:
+          type: string
+          description: 出席登録対象の講義回ID
+        passwordInputId:
+          type: string
+          description: 出席パスワード入力欄のid属性
+        passwordInputName:
+          type: string
+          description: 出席パスワード入力欄のname属性
+        submitAction:
+          type: string
+          description: 画面上の出席登録ボタンのonclick属性
+        submitButtonText:
+          type: string
+          description: 画面上の出席登録ボタンの表示テキスト
+        submitDisabled:
+          type: boolean
+          description: 出席登録ボタンが無効化されているか
+
+    CourseLectureAttendanceRequest:
+      type: object
+      required:
+        - lectureId
+        - password
+      properties:
+        lectureId:
+          type: string
+          description: 出席登録対象の講義回ID
+        password:
+          type: string
+          description: 出席パスワード
+
+    CourseLectureAttendanceResult:
+      type: object
+      required:
+        - success
+        - message
+        - raw
+      properties:
+        success:
+          type: boolean
+          description: 登録が成功したか
+        message:
+          type: string
+          description: ポータルから返された成功またはエラーメッセージ
+        raw:
+          description: ポータルから返された未加工レスポンス
+
+    CourseLectureDetail:
+      type: object
+      required:
+        - courseId
+        - course_name
+        - teacher
+        - notes
+        - sessions
+      properties:
+        courseId:
+          type: string
+          description: 講義（コース）ID
+        course_name:
+          type: string
+          description: 講義名
+        teacher:
+          type: string
+          description: 担当教員名
+        notes:
+          type: string
+          description: 特記事項・お知らせ
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/LectureSessionDetail'
+          description: 各回セッション（講義コマ）の配列
+
+    DistributionPdfItem:
+      type: object
+      required:
+        - title
+        - url
+      properties:
+        title:
+          type: string
+          description: PDF資料のタイトル
+        url:
+          type: string
+          format: uri
+          description: PDFのダウンロードURL
+
+    DistributionPdfGroup:
+      type: object
+      required:
+        - genre
+        - items
+      properties:
+        genre:
+          type: string
+          description: "資料ジャンル・カテゴリ（例: 学生便覧、時間割表など）"
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DistributionPdfItem'
+          description: ジャンルに属するPDF資料一覧
+
+    OfficeMemoFilter:
+      type: string
+      enum:
+        - all
+        - unread
+        - read
+        - star
+      description: 連絡通知のフィルタタイプ
+
+    PaginationInfo:
+      type: object
+      required:
+        - page
+        - limit
+        - hasNextPage
+        - hasPreviousPage
+      properties:
+        page:
+          type: integer
+          description: 現在のページ番号
+        limit:
+          type: integer
+          description: 1ページあたりの取得上限数
+        hasNextPage:
+          type: boolean
+          description: 次のページが存在するかどうか
+        hasPreviousPage:
+          type: boolean
+          description: 前のページが存在するかどうか
+
+    PaginatedReceivedOfficeMemos:
+      type: object
+      required:
+        - items
+        - pagination
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReceivedOfficeMemo'
+          description: 受信連絡通知のリスト
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+          description: ページネーションメタ情報
+
+    MyPageData:
+      type: object
+      required:
+        - new_information
+        - unsubmitted_report_summary
+        - unsubmitted_reports
+        - new_reflection_replies
+        - timetable
+      properties:
+        new_information:
+          $ref: '#/components/schemas/MyPageNewInformationSummary'
+        unsubmitted_report_summary:
+          $ref: '#/components/schemas/UnsubmittedReportSummary'
+        unsubmitted_reports:
+          type: array
+          items:
+            $ref: '#/components/schemas/UnsubmittedReport'
+          description: 未提出のレポート一覧
+        new_reflection_replies:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReflectionReply'
+          description: 新着の振り返り返信一覧
+        timetable:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimetableEntry'
+          description: 本日の時間割
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: エラーメッセージ

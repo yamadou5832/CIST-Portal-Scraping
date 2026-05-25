@@ -200,6 +200,22 @@ app.get("/api/course-lecture-details", async (req, res, next) => {
   }
 });
 
+app.post("/api/course-lecture-attendance", async (req, res, next) => {
+  try {
+    const lectureId = typeof req.body?.lectureId === "string" ? req.body.lectureId : "";
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    if (!lectureId.trim() || !password.trim()) {
+      res.status(400).json({ error: "lectureId and password are required" });
+      return;
+    }
+
+    const data = await scraper.registerCourseLectureAttendance({ lectureId, password });
+    res.status(data.success ? 200 : 400).json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/distribution-pdf-urls", async (_req, res, next) => {
   try {
     const data = await scraper.fetchDistributionPdfUrls();
