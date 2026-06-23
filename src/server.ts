@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 
 import { loadConfig } from "./config.js";
 import { PortalScraperService } from "./scraper.js";
@@ -8,6 +9,7 @@ const config = loadConfig();
 const scraper = new PortalScraperService(config);
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 function getQueryString(value: unknown): string | undefined {
