@@ -1,0 +1,19 @@
+services:
+  api:
+    build:
+      context: .
+    env_file:
+      - .env
+    environment:
+      PORT: "3000"
+      CIST_HEADLESS: "true"
+      CIST_STORAGE_STATE_PATH: /app/.auth/storage-state.json
+      AUTH_SQLITE_PATH: /app/.data/auth.sqlite
+      PUSH_SQLITE_PATH: /app/.data/push.sqlite
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./.auth:/app/.auth
+      - ./.data:/app/.data
+    init: true
+    restart: unless-stopped

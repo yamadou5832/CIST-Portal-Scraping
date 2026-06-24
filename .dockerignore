@@ -1,0 +1,12 @@
+.auth
+.data
+.env
+.env.*
+.git
+.idea
+.pnpm-store
+coverage
+dist
+node_modules
+*.log
+*.tsbuildinfo

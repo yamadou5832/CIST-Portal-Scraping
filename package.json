@@ -11,15 +11,19 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
+    "@simplewebauthn/server": "^13.3.1",
     "cors": "^2.8.6",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
-    "playwright": "^1.54.2"
+    "jose": "^6.2.3",
+    "playwright": "^1.54.2",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "@types/node": "^22.15.17",
+    "@types/web-push": "^3.6.4",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   }

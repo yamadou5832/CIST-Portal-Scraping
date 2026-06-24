@@ -10,10 +10,12 @@ servers:
   - url: http://localhost:3000
     description: ローカル開発サーバー
 security:
-  - {}
+  - bearerAuth: []
 paths:
   /health:
     get:
+      security:
+        - {}
       summary: ヘルスチェック
       description: サーバーが正常に起動しているか確認します。
       operationId: checkHealth
@@ -36,6 +38,210 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/register:
+    post:
+      security:
+        - {}
+      summary: 招待コード付きユーザー登録
+      description: ユーザー情報とCIST-Accountを保存し、メール認証なしでJWTとRefreshトークンを発行します。
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: 登録成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+
+  /api/auth/login:
+    post:
+      security:
+        - {}
+      summary: ユーザー名またはメールアドレスでログイン
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: ログイン成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+
+  /api/auth/refresh:
+    post:
+      security:
+        - {}
+      summary: Refreshトークンをローテーションして再発行
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: 再発行成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+
+  /api/auth/me:
+    get:
+      summary: 認証中ユーザー情報取得
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/AuthUser'
+
+  /api/auth/logout:
+    post:
+      summary: Refreshトークンを失効してログアウト
+      operationId: logoutUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: ログアウト成功
+
+  /api/auth/passkeys/register/options:
+    post:
+      summary: Passkey登録オプション生成
+      operationId: createPasskeyRegistrationOptions
+      responses:
+        '200':
+          description: WebAuthn registration options
+
+  /api/auth/passkeys/register/verify:
+    post:
+      summary: Passkey登録検証
+      operationId: verifyPasskeyRegistration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Passkey登録成功
+
+  /api/auth/passkeys/login/options:
+    post:
+      security:
+        - {}
+      summary: Passkeyログインオプション生成
+      operationId: createPasskeyLoginOptions
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                identifier:
+                  type: string
+                  description: 任意のユーザー名またはメールアドレス
+      responses:
+        '200':
+          description: WebAuthn authentication options
+
+  /api/auth/passkeys/login/verify:
+    post:
+      security:
+        - {}
+      summary: Passkeyログイン検証
+      operationId: verifyPasskeyLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: ログイン成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+
+  /api/auth/passkeys/{credentialId}:
+    delete:
+      summary: 登録済みPasskey削除
+      operationId: deletePasskey
+      parameters:
+        - name: credentialId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 削除成功
+
+  /api/admin/invites:
+    post:
+      summary: 招待コード作成
+      operationId: createInvite
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expiresInDays:
+                  type: integer
+                  minimum: 1
+      responses:
+        '201':
+          description: 作成成功。招待コードはこのレスポンスでのみ返ります。
+    get:
+      summary: 招待一覧
+      operationId: listInvites
+      responses:
+        '200':
+          description: 取得成功
+
+  /api/admin/invites/{inviteId}:
+    delete:
+      summary: 招待コード失効
+      operationId: revokeInvite
+      parameters:
+        - name: inviteId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 失効成功
 
   /api/mypage:
     get:
@@ -518,7 +724,108 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
 
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
+    AuthUser:
+      type: object
+      required:
+        - id
+        - username
+        - email
+        - isAdmin
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        isAdmin:
+          type: boolean
+        emailVerifiedAt:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    RegisterRequest:
+      type: object
+      required:
+        - inviteCode
+        - username
+        - email
+        - password
+        - cistAccount
+      properties:
+        inviteCode:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+        cistAccount:
+          type: object
+          required:
+            - userId
+            - password
+          properties:
+            userId:
+              type: string
+              description: CISTポータルのログインUserID
+            password:
+              type: string
+              format: password
+
+    LoginRequest:
+      type: object
+      required:
+        - identifier
+        - password
+      properties:
+        identifier:
+          type: string
+          description: ユーザー名またはメールアドレス
+        password:
+          type: string
+          format: password
+
+    RefreshRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+
+    AuthTokenResponse:
+      type: object
+      required:
+        - user
+        - accessToken
+        - refreshToken
+      properties:
+        user:
+          $ref: '#/components/schemas/AuthUser'
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+
     UnsubmittedReport:
       type: object
       required:

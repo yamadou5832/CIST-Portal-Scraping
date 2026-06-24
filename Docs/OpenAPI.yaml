@@ -1,0 +1,357 @@
+openapi: 3.0.3
+info:
+  title: CIST Portal Push Notification API
+  description: |
+    CIST Portal PWA が Web Push 通知を利用するために追加を希望する API 仕様です。
+
+    重要な連絡かどうかの判定と Web Push の送信処理は Backend 側で行います。
+    この仕様では、PWA が通知購読を登録・解除するための HTTP エンドポイントと、
+    Backend から Push Service へ送信する通知 payload の形を定義します。
+  version: 0.1.0
+servers:
+  - url: http://localhost:3000
+    description: ローカル開発サーバー
+  - url: https://portal.example.com
+    description: 本番サーバー例
+security:
+  - {}
+tags:
+  - name: Push Notifications
+    description: Web Push 通知の購読管理
+paths:
+  /api/push/vapid-public-key:
+    get:
+      tags:
+        - Push Notifications
+      summary: VAPID 公開鍵取得
+      description: |
+        PWA が `PushManager.subscribe()` を呼び出す際に使用する VAPID 公開鍵を取得します。
+        秘密鍵は Backend 側でのみ保持し、このエンドポイントでは返しません。
+      operationId: getVapidPublicKey
+      responses:
+        "200":
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VapidPublicKeyResponse"
+              example:
+                publicKey: "BEl62iUYgUivxIkv69yViEuiBIa40HI80UmH8yfr7v8G3..."
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/push/subscriptions:
+    post:
+      tags:
+        - Push Notifications
+      summary: Push 購読登録
+      description: |
+        PWA がブラウザから取得した PushSubscription を Backend に登録します。
+        Backend はユーザー単位で購読情報を保存し、重要な連絡が見つかった際にこの購読先へ Web Push を送信します。
+
+        同じ `endpoint` が既に登録済みの場合は、既存レコードを更新して `200` を返しても構いません。
+      operationId: createPushSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushSubscriptionCreateRequest"
+            example:
+              subscription:
+                endpoint: "https://fcm.googleapis.com/fcm/send/fake-endpoint-token"
+                expirationTime: null
+                keys:
+                  p256dh: "BNcRdreALRFXTkOOUHK1Et..."
+                  auth: "tBHItJI5svbpez7KI4CCXg"
+      responses:
+        "201":
+          description: 登録成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushSubscriptionResponse"
+              example:
+                ok: true
+                subscriptionId: "sub_01J7Y4M6QK8YQZ3ZK4W6N2"
+                message: "通知購読を登録しました"
+        "200":
+          description: 既存購読の更新成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushSubscriptionResponse"
+        "400":
+          description: リクエスト不正
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: 認証が必要
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    delete:
+      tags:
+        - Push Notifications
+      summary: Push 購読解除
+      description: |
+        指定された `endpoint` の購読情報を Backend から削除または無効化します。
+        PWA 側では、このAPI成功後にブラウザ側の `PushSubscription.unsubscribe()` を実行します。
+      operationId: deletePushSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushSubscriptionDeleteRequest"
+            example:
+              endpoint: "https://fcm.googleapis.com/fcm/send/fake-endpoint-token"
+      responses:
+        "200":
+          description: 解除成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+              example:
+                ok: true
+                message: "通知購読を解除しました"
+        "400":
+          description: リクエスト不正
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: 認証が必要
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/push/test-notification:
+    post:
+      tags:
+        - Push Notifications
+      summary: Push テスト通知送信
+      description: |
+        登録済みの Push 購読先へテスト通知を送信します。
+        開発・動作確認用のエンドポイントです。
+      operationId: sendTestPushNotification
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushTestNotificationRequest"
+            example:
+              title: "テスト通知"
+              body: "CIST Portal Push通知のテストです"
+              url: "/#memos"
+      responses:
+        "200":
+          description: 送信処理成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushTestNotificationResponse"
+              example:
+                ok: true
+                sent: 1
+                payload:
+                  type: "office_memo"
+                  id: "test-1782220000000"
+                  title: "テスト通知"
+                  body: "CIST Portal Push通知のテストです"
+                  url: "/#memos"
+                  tag: "office-memo-test"
+                message: "テスト通知を送信しました"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    VapidPublicKeyResponse:
+      type: object
+      required:
+        - publicKey
+      properties:
+        publicKey:
+          type: string
+          description: URL-safe Base64 形式の VAPID 公開鍵
+
+    PushSubscriptionCreateRequest:
+      type: object
+      required:
+        - subscription
+      properties:
+        subscription:
+          $ref: "#/components/schemas/PushSubscription"
+
+    PushSubscriptionDeleteRequest:
+      type: object
+      required:
+        - endpoint
+      properties:
+        endpoint:
+          type: string
+          format: uri
+          description: 削除または無効化する PushSubscription の endpoint
+
+    PushSubscription:
+      type: object
+      required:
+        - endpoint
+        - keys
+      properties:
+        endpoint:
+          type: string
+          format: uri
+          description: Push Service が発行した送信先 endpoint
+        expirationTime:
+          type: integer
+          format: int64
+          nullable: true
+          description: 購読の有効期限。ブラウザが null を返す場合があります。
+        keys:
+          type: object
+          required:
+            - p256dh
+            - auth
+          properties:
+            p256dh:
+              type: string
+              description: Web Push 暗号化用の公開鍵
+            auth:
+              type: string
+              description: Web Push 暗号化用の認証secret
+
+    PushSubscriptionResponse:
+      type: object
+      required:
+        - ok
+      properties:
+        ok:
+          type: boolean
+          description: 処理が成功したか
+        subscriptionId:
+          type: string
+          description: Backend 側で採番した購読ID
+        message:
+          type: string
+          description: 表示またはログ用の補足メッセージ
+
+    PushTestNotificationRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          description: OS通知に表示するテスト通知タイトル
+        body:
+          type: string
+          description: OS通知に表示するテスト通知本文
+        url:
+          type: string
+          description: 通知クリック時にPWAで開くURL
+
+    PushTestNotificationResponse:
+      type: object
+      required:
+        - ok
+        - sent
+        - payload
+        - message
+      properties:
+        ok:
+          type: boolean
+          description: 処理が成功したか
+        sent:
+          type: integer
+          description: 送信対象になった購読数
+        payload:
+          $ref: "#/components/schemas/PushNotificationPayload"
+        message:
+          type: string
+          description: 表示またはログ用の補足メッセージ
+
+    PushNotificationPayload:
+      type: object
+      description: |
+        Backend が重要な連絡を検知した際、Web Push の本文として送信する JSON payload です。
+        この schema は HTTP API のレスポンスではなく、Service Worker の `push` event で受け取るデータ形状を示します。
+      required:
+        - type
+        - id
+        - title
+        - body
+        - url
+        - tag
+      properties:
+        type:
+          type: string
+          enum:
+            - office_memo
+          description: 通知種別
+        id:
+          type: string
+          description: 連絡通知ID。重複通知の抑止や遷移先判定に使用します。
+        title:
+          type: string
+          description: OS通知に表示するタイトル
+          example: 重要な連絡があります
+        body:
+          type: string
+          description: OS通知に表示する本文。ロック画面に出るため個人情報は入れすぎないでください。
+          example: ポータルで内容を確認してください
+        url:
+          type: string
+          description: 通知クリック時にPWAで開くURL
+          example: "/#memos"
+        tag:
+          type: string
+          description: ブラウザ側の通知重複制御に使うタグ
+          example: office-memo-12345
+
+    SuccessResponse:
+      type: object
+      required:
+        - ok
+      properties:
+        ok:
+          type: boolean
+          example: true
+        message:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: エラーメッセージ

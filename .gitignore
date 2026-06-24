@@ -234,4 +234,5 @@ fabric.properties
 # User settings
 
 .auth
+.data
 samples
